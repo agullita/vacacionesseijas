@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Vacaciones Inteligente</title>
+    
+    <!-- Librerías necesarias (React, Babel, Tailwind) -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        @media print {
+            .no-print { display: none !important; }
+            .print-full-width { width: 100% !important; overflow: visible !important; height: auto !important; }
+            body, html, #root { 
+                background: white !important; 
+                height: auto !important; 
+                overflow: visible !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            /* Forzar impresión de colores de fondo exactos */
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+        // --- ICONOS ---
+        const Icon = ({ path, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {path}
+            </svg>
+        );
+
+        const CalendarIcon = (p) => <Icon {...p} path={<><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></>} />;
+        const ShieldIcon = (p) => <Icon {...p} path={<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>} />;
+        const InfoIcon = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></>} />;
+        const AlertCircleIcon = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></>} />;
+        const LockIcon = (p) => <Icon {...p} path={<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></>} />;
+        const DownloadIcon = (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></>} />;
+        const PrinterIcon = (p) => <Icon {...p} path={<><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></>} />;
+        const ChevronLeftIcon = (p) => <Icon {...p} path={<polyline points="15 18 9 12 15 6"></polyline>} />;
+        const ChevronRightIcon = (p) => <Icon {...p} path={<polyline points="9 18 15 12 9 6"></polyline>} />;
+
+        // --- CONSTANTES ---
+        const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+        const MONTH_NAMES = [
+            'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+            'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+        ];
+
+        const FIXED_HOLIDAYS = [
+            { m: 0, d: 1, name: 'Año Nuevo' },
+            { m: 0, d: 6, name: 'Reyes' },
+            { m: 4, d: 1, name: 'Día del Trabajo' },
+            { m: 4, d: 2, name: 'Comunidad de Madrid' },
+            { m: 4, d: 15, name: 'San Isidro' },
+            { m: 7, d: 15, name: 'Asunción' },
+            { m: 9, d: 12, name: 'Hispanidad' },
+            { m: 10, d: 1, name: 'Todos los Santos' },
+            { m: 11, d: 6, name: 'Constitución' },
+            { m: 11, d: 8, name: 'Inmaculada' },
+            { m: 11, d: 25, name: 'Navidad' },
+        ];
+
+        const COLORS = {
+            vacaciones: 'bg-green-500',
+            vacaciones_pending: 'bg-green-200 text-green-800',
+            moscosos: 'bg-blue-500',
+            moscosos_pending: 'bg-blue-200 text-blue-800',
+            formacion: 'bg-orange-500',
+            formacion_pending: 'bg-orange-200 text-orange-800',
+            antiguedad: 'bg-purple-500',
+            antiguedad_pending: 'bg-purple-200 text-purple-800',
+            compensatorio: 'bg-yellow-500',
+            compensatorio_pending: 'bg-yellow-200 text-yellow-800',
+            festivo: 'bg-red-400',
+        };
+
+        // --- LÓGICA CORE ---
+
+        const calculateEntitlements = (yearsService) => {
+            let vacaciones = 22;
+            let asimilados = 0;
+            if (yearsService >= 30) asimilados = 4;
+            else if (yearsService >= 25) asimilados = 3;
+            else if (yearsService >= 20) asimilados = 2;
+            else if (yearsService >= 15) asimilados = 1;
+
+            let trienios = 0;
+            if (yearsService >= 39) trienios = 8;
+            else if (yearsService >= 36) trienios = 7;
+            else if (yearsService >= 33) trienios = 6;
+            else if (yearsService >= 30) trienios = 5;
+            else if (yearsService >= 27) trienios = 4;
+            else if (yearsService >= 24) trienios = 3;
+            else if (yearsService >= 18) trienios = 2;
+
+            let moscosos = 6;
+            let formacion = 15;
+
+            return { vacaciones, asimilados, trienios, moscosos, formacion };
+        };
+
+        const generateCalendarYear = (year) => {
+            const days = [];
+            const compensatoriosGenerados = [];
+            
+            const date = new Date(year, 0, 1);
+            while (date.getFullYear() === year) {
+                const month = date.getMonth();
+                const day = date.getDate();
+                const dayOfWeek = date.getDay(); // 0 Dom, 6 Sab
+                
+                let type = 'laborable';
+                let name = '';
+
+                if (dayOfWeek === 0 || dayOfWeek === 6) type = 'finde';
+
+                const holiday = FIXED_HOLIDAYS.find(h => h.m === month && h.d === day);
+                
+                if (holiday) {
+                    if (dayOfWeek === 0) {
+                        type = 'festivo_original'; 
+                    } else if (dayOfWeek === 6) {
+                        type = 'festivo';
+                        name = holiday.name;
+                        compensatoriosGenerados.push({ name: holiday.name, date: new Date(date) });
+                    } else {
+                        type = 'festivo';
+                        name = holiday.name;
+                    }
+                }
+
+                days.push({
+                    date: new Date(date),
+                    day,
+                    month,
+                    dayOfWeek,
+                    type,
+                    name,
+                    iso: date.toISOString().split('T')[0]
+                });
+
+                date.setDate(date.getDate() + 1);
+            }
+
+            for (let i = 0; i < days.length; i++) {
+                const d = days[i];
+                const holiday = FIXED_HOLIDAYS.find(h => h.m === d.month && h.d === d.day);
+                if (holiday && d.dayOfWeek === 0 && i + 1 < days.length) {
+                    days[i+1].type = 'festivo';
+                    days[i+1].name = `Traslado ${holiday.name}`;
+                }
+            }
+
+            return { calendarDays: days, compensatoriosGenerados };
+        };
+
+        const findWorkingNeighbor = (isoDate, direction, calendarDays) => {
+            const currentIndex = calendarDays.findIndex(d => d.iso === isoDate);
+            if (currentIndex === -1) return null;
+
+            let i = currentIndex + direction;
+            while (i >= 0 && i < calendarDays.length) {
+                const day = calendarDays[i];
+                if (day.type === 'laborable') {
+                    return day.iso;
+                }
+                i += direction;
+            }
+            return null;
+        };
+
+        // --- COMPONENTE REACT ---
+
+        function VacationApp() {
+            const [step, setStep] = useState('onboarding'); 
+            const [currentYear, setCurrentYear] = useState(2025);
+            const [userData, setUserData] = useState({
+                years: 0,
+                teleworkDays: [4, 5], 
+                preferences: ''
+            });
+            
+            const [yearData, setYearData] = useState({ calendarDays: [], compensatoriosGenerados: [] });
+            const [entitlements, setEntitlements] = useState({});
+            const [requests, setRequests] = useState([]); 
+            const [pendingRequests, setPendingRequests] = useState([]); 
+            const [selectedType, setSelectedType] = useState('vacaciones'); 
+            const [agentMessage, setAgentMessage] = useState("Hola, soy tu asistente de RRHH. Para empezar, necesito configurar tu perfil.");
+            const [agentStatus, setAgentStatus] = useState('neutral');
+
+            useEffect(() => {
+                const data = generateCalendarYear(currentYear);
+                setYearData(data);
+            }, [currentYear]);
+
+            const getUsedCount = (type) => requests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
+
+            const validateRules = useCallback((type, candidateDates, currentRequests) => {
+                const count = candidateDates.length;
+                if (count === 0) return { status: 'neutral', message: `Seleccionando ${type}...` };
+
+                // Crear mapa completo de días
+                const allRequestsMap = new Map();
+                currentRequests
+                    .filter(r => r.date.startsWith(currentYear.toString()))
+                    .forEach(r => allRequestsMap.set(r.date, r.type));
+                candidateDates.forEach(d => allRequestsMap.set(d, type));
+
+                // Validación de Moscosos
+                const moscosoDates = Array.from(allRequestsMap.entries())
+                    .filter(([_, t]) => t === 'moscosos')
+                    .map(([d]) => d);
+
+                for (const mDate of moscosoDates) {
+                    const prev = findWorkingNeighbor(mDate, -1, yearData.calendarDays);
+                    const next = findWorkingNeighbor(mDate, 1, yearData.calendarDays);
+                    const neighbors = [prev, next].filter(n => n && allRequestsMap.has(n));
+                    
+                    for (const neighborIso of neighbors) {
+                        const neighborType = allRequestsMap.get(neighborIso);
+                        
+                        // REGLA CLAVE: Moscosos incompatibles con Antigüedad, Formación o Compensatorios
+                        if (['antiguedad', 'formacion', 'compensatorio'].includes(neighborType)) {
+                            return { 
+                                status: 'error', 
+                                message: `⛔ Error Moscosos: El día ${mDate} se une a un día de ${neighborType.toUpperCase()}. Prohibido.` 
+                            };
+                        }
+
+                        // REGLA VACACIONES: Solo si bloque < 5
+                        if (neighborType === 'vacaciones') {
+                            let blockSize = 1;
+                            const checked = new Set([neighborIso]);
+                            const queue = [neighborIso];
+
+                            while (queue.length > 0) {
+                                const current = queue.pop();
+                                const p = findWorkingNeighbor(current, -1, yearData.calendarDays);
+                                const n = findWorkingNeighbor(current, 1, yearData.calendarDays);
+                                [p, n].forEach(adj => {
+                                    if (adj && allRequestsMap.get(adj) === 'vacaciones' && !checked.has(adj)) {
+                                        checked.add(adj);
+                                        queue.push(adj);
+                                        blockSize++;
+                                    }
+                                });
+                            }
+
+                            if (blockSize >= 5) {
+                                return { 
+                                    status: 'error', 
+                                    message: `⛔ Error Moscosos: El moscoso del día ${mDate} toca un bloque principal de vacaciones (${blockSize} días). Solo permitido con días sueltos.` 
+                                };
+                            }
+                        }
+                    }
+                }
+
+                const usedCommitted = currentRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
+
+                // Validación Formación
+                if (type === 'formacion') {
+                    const sortedDates = [...candidateDates].sort();
+                    const blocks = [];
+                    let currentBlock = 1;
+                    for (let i = 0; i < sortedDates.length - 1; i++) {
+                        const d1 = new Date(sortedDates[i]);
+                        const d2 = new Date(sortedDates[i+1]);
+                        const diffTime = Math.abs(d2 - d1);
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                        if (diffDays === 1) currentBlock++;
+                        else { blocks.push(currentBlock); currentBlock = 1; }
+                    }
+                    blocks.push(currentBlock);
+
+                    const isValidBlocks = 
+                        (blocks.length === 1 && blocks[0] === 15) || 
+                        (blocks.length === 2 && ((blocks[0] === 7 && blocks[1] === 8) || (blocks[0] === 8 && blocks[1] === 7)));
+
+                    if (!isValidBlocks) {
+                        return { status: 'error', message: `Formación debe ser 15 días seguidos o bloques de 7+8. Marca también fines de semana.` };
+                    }
+                }
+
+                // Validación Vacaciones
+                if (type === 'vacaciones') {
+                    const lockedPoolLimit = 15;
+                    const remainingLockedDays = Math.max(0, lockedPoolLimit - usedCommitted);
+
+                    if (remainingLockedDays > 0) {
+                        if (count <= remainingLockedDays) {
+                            if (count % 5 !== 0) {
+                                return { status: 'error', message: `Estás usando días de los primeros 15 bloqueados. Deben ser múltiplos de 5.` };
+                            }
+                        }
+                    }
+
+                    let teleWorkCount = 0;
+                    candidateDates.forEach(iso => {
+                        const d = yearData.calendarDays.find(day => day.iso === iso);
+                        if (d && userData.teleworkDays.includes(d.dayOfWeek)) teleWorkCount++;
+                    });
+
+                    const ratio = teleWorkCount / count;
+                    if (count >= 5) {
+                        if (count % 5 === 0) {
+                            const expectedTele = count * 0.4;
+                            if (teleWorkCount !== expectedTele) return { status: 'error', message: `Ratio incorrecto. Necesitas ${expectedTele} días de teletrabajo.` };
+                        } else {
+                            if (ratio < 0.25 || ratio > 0.60) return { status: 'error', message: `Ratio desviado (${(ratio*100).toFixed(0)}%). Mantente cerca del 40%.` };
+                        }
+                    } else if (count >= 3) {
+                        if (teleWorkCount === 0 || teleWorkCount === count) return { status: 'error', message: `Ratio extremo (0% o 100%). Intenta equilibrar.` };
+                    }
+                }
+
+                return { status: 'success', message: 'Selección válida.' };
+
+            }, [yearData, userData, currentYear]);
+
+            // Efecto Validacion
+            useEffect(() => {
+                if (step !== 'dashboard') return;
+                const currentPendingDates = pendingRequests.filter(r => r.type === selectedType && r.date.startsWith(currentYear.toString())).map(r => r.date);
+                if (currentPendingDates.length === 0) {
+                    const msg = selectedType === 'formacion' ? `Modo: Formación. Marca findes.` : `Modo: ${selectedType.toUpperCase()}.`;
+                    setAgentMessage(msg);
+                    setAgentStatus('neutral');
+                    return;
+                }
+                const result = validateRules(selectedType, currentPendingDates, requests);
+                setAgentMessage(result.message);
+                setAgentStatus(result.status);
+            }, [selectedType, pendingRequests, requests, step, validateRules, currentYear]);
+
+            const handleOnboardingSubmit = (e) => {
+                e.preventDefault();
+                const ent = calculateEntitlements(userData.years);
+                setEntitlements(ent);
+                setStep('dashboard');
+                setAgentMessage(`¡Perfil listo! Planifica tu año.`);
+                setAgentStatus('success');
+            };
+
+            const toggleDateSelection = (isoDate) => {
+                const dayObj = yearData.calendarDays.find(d => d.iso === isoDate);
+                if (!dayObj) return;
+                if (selectedType !== 'formacion' && (dayObj.type === 'festivo' || dayObj.type === 'finde')) return;
+                if (requests.find(r => r.date === isoDate)) return;
+
+                const existingPendingIndex = pendingRequests.findIndex(r => r.date === isoDate);
+                if (existingPendingIndex >= 0) {
+                    const existing = pendingRequests[existingPendingIndex];
+                    if (existing.type === selectedType) {
+                        const newPending = [...pendingRequests];
+                        newPending.splice(existingPendingIndex, 1);
+                        setPendingRequests(newPending);
+                    } else {
+                        const newPending = [...pendingRequests];
+                        newPending[existingPendingIndex] = { date: isoDate, type: selectedType };
+                        setPendingRequests(newPending);
+                    }
+                } else {
+                    setPendingRequests([...pendingRequests, { date: isoDate, type: selectedType }]);
+                }
+            };
+
+            const validateAndBook = () => {
+                if (pendingRequests.length === 0) { setAgentMessage("Nada seleccionado."); setAgentStatus('warning'); return; }
+                const typesToValidate = [...new Set(pendingRequests.map(r => r.type))];
+                for (const type of typesToValidate) {
+                    const datesOfType = pendingRequests.filter(r => r.type === type).map(r => r.date);
+                    const result = validateRules(type, datesOfType, requests);
+                    if (result.status === 'error') {
+                        setSelectedType(type);
+                        setAgentMessage(`⛔ Error en ${type.toUpperCase()}: ${result.message}`);
+                        setAgentStatus('error');
+                        return;
+                    }
+                }
+                setRequests([...requests, ...pendingRequests]);
+                setPendingRequests([]);
+                setAgentMessage("✅ Guardado.");
+                setAgentStatus('success');
+            };
+
+            const downloadCSV = () => {
+                if (requests.length === 0) return;
+                let csvContent = "data:text/csv;charset=utf-8,%EF%BB%BF";
+                const headers = ['Fecha', 'Tipo', 'Día Semana'];
+                const rows = [...requests].sort((a, b) => a.date.localeCompare(b.date)).map(req => {
+                    const d = new Date(req.date);
+                    const dayIdx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+                    const dayStr = d.getDate().toString().padStart(2, '0');
+                    const monthStr = (d.getMonth() + 1).toString().padStart(2, '0');
+                    const yearStr = d.getFullYear();
+                    return `${dayStr}/${monthStr}/${yearStr},${req.type.toUpperCase()},${DAY_NAMES[dayIdx]}`;
+                });
+                csvContent += encodeURIComponent([headers.join(','), ...rows].join('\n'));
+                const link = document.createElement("a");
+                link.setAttribute("href", csvContent);
+                link.setAttribute("download", `vacaciones_${currentYear}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handlePrint = () => {
+                window.focus();
+                window.print();
+            };
+
+            // --- RENDER ---
+            if (step === 'onboarding') {
+                return (
+                    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+                        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-lg w-full">
+                            <div className="flex items-center gap-3 mb-6">
+                                <ShieldIcon className="w-8 h-8 text-blue-600" />
+                                <h1 className="text-2xl font-bold text-slate-800">Configuración</h1>
+                            </div>
+                            <form onSubmit={handleOnboardingSubmit} className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">Años de Antigüedad</label>
+                                    <input type="number" min="0" max="50" required className="w-full border p-3 rounded-lg" value={userData.years} onChange={(e) => setUserData({...userData, years: parseInt(e.target.value) || 0})} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">Días de Teletrabajo</label>
+                                    <div className="flex gap-2">
+                                        {['Lun', 'Mar', 'Mié', 'Jue', 'Vie'].map((day, idx) => {
+                                            const dayNum = idx + 1;
+                                            const isSelected = userData.teleworkDays.includes(dayNum);
+                                            return (
+                                                <button key={day} type="button" onClick={() => isSelected ? setUserData({...userData, teleworkDays: userData.teleworkDays.filter(d => d !== dayNum)}) : (userData.teleworkDays.length < 2 && setUserData({...userData, teleworkDays: [...userData.teleworkDays, dayNum]}))} className={`flex-1 py-2 rounded-md border text-sm ${isSelected ? 'bg-blue-600 text-white' : 'bg-white'}`}>{day}</button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                                <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold">Iniciar</button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            const compensatoriosTotal = yearData.compensatoriosGenerados.length;
+            const vacTotal = entitlements.vacaciones + entitlements.asimilados;
+            const getRealTimeUsage = (type, committedUsed) => committedUsed + pendingRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
+
+            return (
+                <div className="min-h-screen md:h-screen bg-slate-50 font-sans flex flex-col md:flex-row md:overflow-hidden print:overflow-visible print:h-auto print:block">
+                    {/* SIDEBAR */}
+                    <div className="w-full md:w-80 bg-white border-r border-slate-200 p-6 flex flex-col gap-6 md:h-full md:overflow-y-auto shrink-0 shadow-lg z-10 no-print">
+                        <div className="flex items-center gap-2 text-slate-800">
+                            <ShieldIcon className="w-6 h-6 text-blue-600" />
+                            <h2 className="font-bold text-xl">Gestor Vacaciones</h2>
+                        </div>
+                        <div className={`p-4 rounded-lg text-sm border-l-4 shadow-sm transition-colors duration-300 ${agentStatus === 'error' ? 'bg-red-50 border-red-500 text-red-800' : agentStatus === 'warning' ? 'bg-yellow-50 border-yellow-500 text-yellow-800' : agentStatus === 'success' ? 'bg-green-50 border-green-500 text-green-800' : 'bg-blue-50 border-blue-500 text-blue-900'}`}>
+                            <div className="flex items-start gap-2">
+                                {agentStatus === 'error' ? <AlertCircleIcon className="w-5 h-5 shrink-0" /> : <InfoIcon className="w-5 h-5 shrink-0" />}
+                                <p className="font-medium">{agentMessage}</p>
+                            </div>
+                        </div>
+                        <div className="space-y-3">
+                            {[
+                                { id: 'vacaciones', label: 'Vacaciones Ordinarias', total: vacTotal, color: 'bg-green-500' },
+                                { id: 'antiguedad', label: 'Antigüedad (Trienios)', total: entitlements.trienios, color: 'bg-purple-500' },
+                                { id: 'moscosos', label: 'Moscosos', total: entitlements.moscosos, color: 'bg-blue-500' },
+                                { id: 'compensatorio', label: 'Compensatorios Sáb.', total: compensatoriosTotal, color: 'bg-yellow-500' },
+                                { id: 'formacion', label: 'Formación', total: entitlements.formacion, color: 'bg-orange-500' },
+                            ].map(type => {
+                                const committed = getUsedCount(type.id);
+                                const realTimeUsed = getRealTimeUsage(type.id, committed);
+                                const remaining = type.total - realTimeUsed;
+                                const isSelected = selectedType === type.id;
+                                const hasPending = pendingRequests.some(r => r.type === type.id && r.date.startsWith(currentYear.toString()));
+                                return (
+                                    <button key={type.id} type="button" onClick={() => { setSelectedType(type.id); setAgentStatus('neutral'); }} className={`w-full text-left p-3 rounded-lg border transition-all relative ${isSelected ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'} ${type.total === 0 ? 'opacity-50' : ''}`} disabled={type.total === 0}>
+                                        { !isSelected && hasPending && <span className="absolute top-2 right-2 w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span> }
+                                        <div className="flex justify-between items-center mb-1">
+                                            <span className="font-semibold text-sm text-slate-700">{type.label}</span>
+                                            {type.id === 'vacaciones' && remaining > 7 + entitlements.asimilados && <LockIcon className="w-3 h-3 text-slate-400" />}
+                                        </div>
+                                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden relative">
+                                            <div className={`h-full ${type.color} opacity-60 absolute left-0 top-0`} style={{ width: `${(committed / type.total) * 100}%` }}></div>
+                                            <div className={`h-full ${type.color} absolute top-0 transition-all duration-300`} style={{ left: `${(committed / type.total) * 100}%`, width: `${((realTimeUsed - committed) / type.total) * 100}%` }}></div>
+                                        </div>
+                                        <div className="flex justify-between text-xs text-slate-500 mt-1 font-mono">
+                                            <span>Usados: {realTimeUsed}</span>
+                                            <span className={remaining < 0 ? 'text-red-600 font-bold' : ''}>Restantes: {remaining}</span>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <div className="mt-auto pt-4 border-t space-y-3">
+                            <button type="button" onClick={validateAndBook} className={`w-full py-3 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2 ${pendingRequests.length > 0 ? 'bg-slate-900 hover:bg-slate-800 shadow-lg transform active:scale-95' : 'bg-slate-300 cursor-not-allowed'}`} disabled={pendingRequests.length === 0}>
+                                {pendingRequests.length > 0 ? `Validar Todo (${pendingRequests.length} días)` : 'Nada pendiente'}
+                            </button>
+                            <div className="flex gap-2">
+                                {requests.length > 0 && ( <button type="button" onClick={downloadCSV} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Descargar CSV"> <DownloadIcon className="w-4 h-4" /> CSV </button> )}
+                                <button type="button" onClick={handlePrint} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Imprimir"> <PrinterIcon className="w-4 h-4" /> Imprimir </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* CALENDARIO */}
+                    <div className="flex-1 p-6 md:h-full md:overflow-y-auto print-full-width">
+                        <div className="flex justify-between items-center mb-6 sticky top-0 bg-slate-50 py-2 z-10 no-print">
+                            <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2"> <CalendarIcon className="w-6 h-6" /> Calendario {currentYear} </h2>
+                            <div className="flex items-center gap-4 bg-white px-4 py-2 rounded-lg shadow-sm border border-slate-200">
+                                <button onClick={() => setCurrentYear(y => y - 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors"> <ChevronLeftIcon className="w-5 h-5 text-slate-600" /> </button>
+                                <span className="font-bold text-lg text-slate-800 min-w-[3ch] text-center">{currentYear}</span>
+                                <button onClick={() => setCurrentYear(y => y + 1)} className="p-1 hover:bg-slate-100 rounded-full transition-colors"> <ChevronRightIcon className="w-5 h-5 text-slate-600" /> </button>
+                            </div>
+                        </div>
+                        <h2 className="hidden print:block text-2xl font-bold text-slate-800 mb-6 text-center"> Planificación Vacaciones {currentYear} </h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 print:grid-cols-3 print:gap-4 print:text-xs">
+                            {MONTH_NAMES.map((monthName, mIdx) => {
+                                const currentMonthDays = yearData.calendarDays.filter(d => d.month === mIdx);
+                                const firstDayObj = new Date(currentYear, mIdx, 1);
+                                const firstDayWeekIndex = firstDayObj.getDay() === 0 ? 6 : firstDayObj.getDay() - 1;
+                                return (
+                                    <div key={monthName} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden break-inside-avoid">
+                                        <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 font-semibold text-slate-700 text-center print:py-1 print:bg-slate-200">{monthName}</div>
+                                        <div className="p-4 grid grid-cols-7 gap-1 text-center text-sm print:p-2 print:gap-0.5">
+                                            {DAY_NAMES.map(d => <span key={d} className="text-slate-400 text-xs font-bold mb-2 print:mb-1">{d.charAt(0)}</span>)}
+                                            {Array.from({ length: firstDayWeekIndex }).map((_, i) => <div key={`e-${i}`} />)}
+                                            {currentMonthDays.map(day => {
+                                                const committedReq = requests.find(r => r.date === day.iso);
+                                                const pendingReq = pendingRequests.find(r => r.date === day.iso);
+                                                const isTele = userData.teleworkDays.includes(day.dayOfWeek);
+                                                let base = "rounded-md flex flex-col items-center justify-center relative text-xs transition-colors ";
+                                                if (day.type === 'finde') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-slate-400 " : "text-slate-300 bg-slate-50 ";
+                                                else if (day.type === 'festivo') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-red-400 " : "bg-red-400 text-white ";
+                                                else if (committedReq) base += COLORS[committedReq.type] + " text-white cursor-not-allowed opacity-60 "; 
+                                                else if (pendingReq) base += COLORS[pendingReq.type + '_pending'] + " ring-2 ring-slate-400 font-bold cursor-pointer ";
+                                                else base += "hover:bg-slate-100 cursor-pointer text-slate-700 ";
+                                                if ((day.type === 'finde' || day.type === 'festivo') && pendingReq) { base = COLORS[pendingReq.type + '_pending'] + " ring-2 ring-slate-400 font-bold cursor-pointer aspect-square rounded-md flex flex-col items-center justify-center relative text-xs "; }
+                                                return (
+                                                    <div key={day.iso} onClick={() => toggleDateSelection(day.iso)} className={base + " aspect-square"}>
+                                                        {day.day}
+                                                        {isTele && day.type === 'laborable' && !committedReq && <span className="w-1 h-1 rounded-full bg-slate-400 absolute bottom-1 no-print"/>}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<VacationApp />);
+    </script>
+</body>
+</html>

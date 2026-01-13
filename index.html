@@ -188,6 +188,7 @@
             const [userData, setUserData] = useState({
                 years: 0,
                 teleworkDays: [4, 5], 
+                saturdayHolidays: 0,
                 preferences: ''
             });
             
@@ -210,14 +211,12 @@
                 const count = candidateDates.length;
                 if (count === 0) return { status: 'neutral', message: `Seleccionando ${type}...` };
 
-                // Crear mapa completo de días
                 const allRequestsMap = new Map();
                 currentRequests
                     .filter(r => r.date.startsWith(currentYear.toString()))
                     .forEach(r => allRequestsMap.set(r.date, r.type));
                 candidateDates.forEach(d => allRequestsMap.set(d, type));
 
-                // Validación de Moscosos
                 const moscosoDates = Array.from(allRequestsMap.entries())
                     .filter(([_, t]) => t === 'moscosos')
                     .map(([d]) => d);
@@ -225,12 +224,12 @@
                 for (const mDate of moscosoDates) {
                     const prev = findWorkingNeighbor(mDate, -1, yearData.calendarDays);
                     const next = findWorkingNeighbor(mDate, 1, yearData.calendarDays);
+                    
                     const neighbors = [prev, next].filter(n => n && allRequestsMap.has(n));
                     
                     for (const neighborIso of neighbors) {
                         const neighborType = allRequestsMap.get(neighborIso);
                         
-                        // REGLA CLAVE: Moscosos incompatibles con Antigüedad, Formación o Compensatorios
                         if (['antiguedad', 'formacion', 'compensatorio'].includes(neighborType)) {
                             return { 
                                 status: 'error', 
@@ -238,7 +237,6 @@
                             };
                         }
 
-                        // REGLA VACACIONES: Solo si bloque < 5
                         if (neighborType === 'vacaciones') {
                             let blockSize = 1;
                             const checked = new Set([neighborIso]);
@@ -269,7 +267,6 @@
 
                 const usedCommitted = currentRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
 
-                // Validación Formación
                 if (type === 'formacion') {
                     const sortedDates = [...candidateDates].sort();
                     const blocks = [];
@@ -293,7 +290,6 @@
                     }
                 }
 
-                // Validación Vacaciones
                 if (type === 'vacaciones') {
                     const lockedPoolLimit = 15;
                     const remainingLockedDays = Math.max(0, lockedPoolLimit - usedCommitted);
@@ -329,7 +325,6 @@
 
             }, [yearData, userData, currentYear]);
 
-            // Efecto Validacion
             useEffect(() => {
                 if (step !== 'dashboard') return;
                 const currentPendingDates = pendingRequests.filter(r => r.type === selectedType && r.date.startsWith(currentYear.toString())).map(r => r.date);
@@ -435,6 +430,13 @@
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Años de Antigüedad</label>
                                     <input type="number" min="0" max="50" required className="w-full border p-3 rounded-lg" value={userData.years} onChange={(e) => setUserData({...userData, years: parseInt(e.target.value) || 0})} />
                                 </div>
+                                
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">¿Cuántos festivos coinciden con sábado?</label>
+                                    <input type="number" min="0" max="10" required className="w-full border p-3 rounded-lg" value={userData.saturdayHolidays} onChange={(e) => setUserData({...userData, saturdayHolidays: parseInt(e.target.value) || 0})} />
+                                    <p className="text-xs text-slate-500 mt-1">Este número determinará tus días de "Compensatorios Sáb."</p>
+                                </div>
+
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Días de Teletrabajo</label>
                                     <div className="flex gap-2">
@@ -454,7 +456,8 @@
                 );
             }
 
-            const compensatoriosTotal = yearData.compensatoriosGenerados.length;
+            // Usamos el valor introducido por el usuario para el total
+            const compensatoriosTotal = userData.saturdayHolidays;
             const vacTotal = entitlements.vacaciones + entitlements.asimilados;
             const getRealTimeUsage = (type, committedUsed) => committedUsed + pendingRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
 

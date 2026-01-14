@@ -82,6 +82,8 @@
             antiguedad_pending: 'bg-purple-200 text-purple-800',
             compensatorio: 'bg-yellow-500',
             compensatorio_pending: 'bg-yellow-200 text-yellow-800',
+            sanisidro: 'bg-teal-500',
+            sanisidro_pending: 'bg-teal-200 text-teal-800',
             festivo: 'bg-red-400',
         };
 
@@ -106,8 +108,9 @@
 
             let moscosos = 6;
             let formacion = 15;
+            let sanisidro = 1;
 
-            return { vacaciones, asimilados, trienios, moscosos, formacion };
+            return { vacaciones, asimilados, trienios, moscosos, formacion, sanisidro };
         };
 
         const generateCalendarYear = (year) => {
@@ -230,6 +233,8 @@
                     for (const neighborIso of neighbors) {
                         const neighborType = allRequestsMap.get(neighborIso);
                         
+                        // REGLA CLAVE: Moscosos incompatibles con Antigüedad, Formación o Compensatorios. 
+                        // NOTA: San Isidro NO está en esta lista prohibida.
                         if (['antiguedad', 'formacion', 'compensatorio'].includes(neighborType)) {
                             return { 
                                 status: 'error', 
@@ -267,6 +272,7 @@
 
                 const usedCommitted = currentRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
 
+                // Validación Formación
                 if (type === 'formacion') {
                     const sortedDates = [...candidateDates].sort();
                     const blocks = [];
@@ -290,6 +296,7 @@
                     }
                 }
 
+                // Validación Vacaciones
                 if (type === 'vacaciones') {
                     const lockedPoolLimit = 15;
                     const remainingLockedDays = Math.max(0, lockedPoolLimit - usedCommitted);
@@ -456,7 +463,6 @@
                 );
             }
 
-            // Usamos el valor introducido por el usuario para el total
             const compensatoriosTotal = userData.saturdayHolidays;
             const vacTotal = entitlements.vacaciones + entitlements.asimilados;
             const getRealTimeUsage = (type, committedUsed) => committedUsed + pendingRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
@@ -481,6 +487,7 @@
                                 { id: 'antiguedad', label: 'Antigüedad (Trienios)', total: entitlements.trienios, color: 'bg-purple-500' },
                                 { id: 'moscosos', label: 'Moscosos', total: entitlements.moscosos, color: 'bg-blue-500' },
                                 { id: 'compensatorio', label: 'Compensatorios Sáb.', total: compensatoriosTotal, color: 'bg-yellow-500' },
+                                { id: 'sanisidro', label: 'San Isidro (1 día)', total: entitlements.sanisidro, color: 'bg-teal-500' },
                                 { id: 'formacion', label: 'Formación', total: entitlements.formacion, color: 'bg-orange-500' },
                             ].map(type => {
                                 const committed = getUsedCount(type.id);
@@ -573,3 +580,5 @@
     </script>
 </body>
 </html>
+    
+   

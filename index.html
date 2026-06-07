@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gestor de Vacaciones Inteligente</title>
-    
+
     <!-- Librerías necesarias (React, Babel, Tailwind) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -13,20 +14,35 @@
 
     <style>
         @media print {
-            .no-print { display: none !important; }
-            .print-full-width { width: 100% !important; overflow: visible !important; height: auto !important; }
-            body, html, #root { 
-                background: white !important; 
-                height: auto !important; 
+            .no-print {
+                display: none !important;
+            }
+
+            .print-full-width {
+                width: 100% !important;
+                overflow: visible !important;
+                height: auto !important;
+            }
+
+            body,
+            html,
+            #root {
+                background: white !important;
+                height: auto !important;
                 overflow: visible !important;
                 margin: 0 !important;
                 padding: 0 !important;
             }
+
             /* Forzar impresión de colores de fondo exactos */
-            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
         }
     </style>
 </head>
+
 <body class="bg-slate-50 text-slate-800">
     <div id="root"></div>
 
@@ -113,33 +129,63 @@
             return { vacaciones, asimilados, trienios, moscosos, formacion, sanisidro };
         };
 
-        const generateCalendarYear = (year) => {
+        const getDefaultHolidays = (year) => {
+            const holidays = [];
+            const date = new Date(year, 0, 1);
+            const endLimit = new Date(year + 1, 1, 1);
+            const tempDays = [];
+            while (date < endLimit) {
+                tempDays.push({
+                    date: new Date(date),
+                    month: date.getMonth(),
+                    day: date.getDate(),
+                    dayOfWeek: date.getDay(),
+                    iso: date.toISOString().split('T')[0]
+                });
+                date.setDate(date.getDate() + 1);
+            }
+            
+            tempDays.forEach(d => {
+                const holiday = FIXED_HOLIDAYS.find(h => h.m === d.month && h.d === d.day);
+                if (holiday && d.dayOfWeek !== 0) {
+                    holidays.push(d.iso);
+                }
+            });
+            
+            for (let i = 0; i < tempDays.length; i++) {
+                const d = tempDays[i];
+                const holiday = FIXED_HOLIDAYS.find(h => h.m === d.month && h.d === d.day);
+                if (holiday && d.dayOfWeek === 0 && i + 1 < tempDays.length) {
+                    holidays.push(tempDays[i + 1].iso);
+                }
+            }
+            
+            return [...new Set(holidays)];
+        };
+
+        const generateCalendarYear = (year, customHolidays = []) => {
             const days = [];
             const compensatoriosGenerados = [];
-            
+
             const date = new Date(year, 0, 1);
-            while (date.getFullYear() === year) {
+            const endLimit = new Date(year + 1, 1, 1); // 1 de Febrero del año siguiente
+            while (date < endLimit) {
                 const month = date.getMonth();
                 const day = date.getDate();
                 const dayOfWeek = date.getDay(); // 0 Dom, 6 Sab
-                
+                const currentYearOfDate = date.getFullYear();
+                const iso = date.toISOString().split('T')[0];
+
                 let type = 'laborable';
                 let name = '';
 
                 if (dayOfWeek === 0 || dayOfWeek === 6) type = 'finde';
 
-                const holiday = FIXED_HOLIDAYS.find(h => h.m === month && h.d === day);
-                
-                if (holiday) {
-                    if (dayOfWeek === 0) {
-                        type = 'festivo_original'; 
-                    } else if (dayOfWeek === 6) {
-                        type = 'festivo';
-                        name = holiday.name;
-                        compensatoriosGenerados.push({ name: holiday.name, date: new Date(date) });
-                    } else {
-                        type = 'festivo';
-                        name = holiday.name;
+                if (customHolidays.includes(iso)) {
+                    type = 'festivo';
+                    name = 'Festivo';
+                    if (dayOfWeek === 6 && currentYearOfDate === year) {
+                        compensatoriosGenerados.push({ name: 'Festivo Sábado', date: new Date(date) });
                     }
                 }
 
@@ -150,19 +196,10 @@
                     dayOfWeek,
                     type,
                     name,
-                    iso: date.toISOString().split('T')[0]
+                    iso
                 });
 
                 date.setDate(date.getDate() + 1);
-            }
-
-            for (let i = 0; i < days.length; i++) {
-                const d = days[i];
-                const holiday = FIXED_HOLIDAYS.find(h => h.m === d.month && h.d === d.day);
-                if (holiday && d.dayOfWeek === 0 && i + 1 < days.length) {
-                    days[i+1].type = 'festivo';
-                    days[i+1].name = `Traslado ${holiday.name}`;
-                }
             }
 
             return { calendarDays: days, compensatoriosGenerados };
@@ -186,29 +223,33 @@
         // --- COMPONENTE REACT ---
 
         function VacationApp() {
-            const [step, setStep] = useState('onboarding'); 
+            const [step, setStep] = useState('onboarding');
             const [currentYear, setCurrentYear] = useState(2025);
             const [userData, setUserData] = useState({
                 years: 0,
-                teleworkDays: [4, 5], 
-                saturdayHolidays: 0,
+                teleworkDays: [1, 2, 5],
                 preferences: ''
             });
-            
+            const [customHolidays, setCustomHolidays] = useState([]);
+ 
             const [yearData, setYearData] = useState({ calendarDays: [], compensatoriosGenerados: [] });
             const [entitlements, setEntitlements] = useState({});
-            const [requests, setRequests] = useState([]); 
-            const [pendingRequests, setPendingRequests] = useState([]); 
-            const [selectedType, setSelectedType] = useState('vacaciones'); 
+            const [requests, setRequests] = useState([]);
+            const [pendingRequests, setPendingRequests] = useState([]);
+            const [selectedType, setSelectedType] = useState('vacaciones');
             const [agentMessage, setAgentMessage] = useState("Hola, soy tu asistente de RRHH. Para empezar, necesito configurar tu perfil.");
             const [agentStatus, setAgentStatus] = useState('neutral');
-
+ 
             useEffect(() => {
-                const data = generateCalendarYear(currentYear);
-                setYearData(data);
+                setCustomHolidays(getDefaultHolidays(currentYear));
             }, [currentYear]);
+ 
+            useEffect(() => {
+                const data = generateCalendarYear(currentYear, customHolidays);
+                setYearData(data);
+            }, [currentYear, customHolidays]);
 
-            const getUsedCount = (type) => requests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
+            const getUsedCount = (type) => requests.filter(r => r.type === type && r.planningYear === currentYear).length;
 
             const validateRules = useCallback((type, candidateDates, currentRequests) => {
                 const count = candidateDates.length;
@@ -216,7 +257,7 @@
 
                 const allRequestsMap = new Map();
                 currentRequests
-                    .filter(r => r.date.startsWith(currentYear.toString()))
+                    .filter(r => r.planningYear === currentYear)
                     .forEach(r => allRequestsMap.set(r.date, r.type));
                 candidateDates.forEach(d => allRequestsMap.set(d, type));
 
@@ -227,18 +268,18 @@
                 for (const mDate of moscosoDates) {
                     const prev = findWorkingNeighbor(mDate, -1, yearData.calendarDays);
                     const next = findWorkingNeighbor(mDate, 1, yearData.calendarDays);
-                    
+
                     const neighbors = [prev, next].filter(n => n && allRequestsMap.has(n));
-                    
+
                     for (const neighborIso of neighbors) {
                         const neighborType = allRequestsMap.get(neighborIso);
-                        
+
                         // REGLA CLAVE: Moscosos incompatibles con Antigüedad, Formación o Compensatorios. 
                         // NOTA: San Isidro NO está en esta lista prohibida.
                         if (['antiguedad', 'formacion', 'compensatorio'].includes(neighborType)) {
-                            return { 
-                                status: 'error', 
-                                message: `⛔ Error Moscosos: El día ${mDate} se une a un día de ${neighborType.toUpperCase()}. Prohibido.` 
+                            return {
+                                status: 'error',
+                                message: `⛔ Error Moscosos: El día ${mDate} se une a un día de ${neighborType.toUpperCase()}. Prohibido.`
                             };
                         }
 
@@ -261,16 +302,108 @@
                             }
 
                             if (blockSize >= 5) {
-                                return { 
-                                    status: 'error', 
-                                    message: `⛔ Error Moscosos: El moscoso del día ${mDate} toca un bloque principal de vacaciones (${blockSize} días). Solo permitido con días sueltos.` 
+                                return {
+                                    status: 'error',
+                                    message: `⛔ Error Moscosos: El moscoso del día ${mDate} toca un bloque principal de vacaciones (${blockSize} días). Solo permitido con días sueltos.`
                                 };
                             }
                         }
                     }
                 }
 
-                const usedCommitted = currentRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
+                const usedCommitted = currentRequests.filter(r => r.type === type && r.planningYear === currentYear).length;
+
+                // Validación Moscosos (Límite y repartos)
+                if (type === 'moscosos') {
+                    const totalMoscososCount = usedCommitted + count;
+                    if (totalMoscososCount > 6) {
+                        return { status: 'error', message: `Superas el límite de moscosos. Permitidos: 6, Seleccionados: ${totalMoscososCount}.` };
+                    }
+                    
+                    const allMoscosoDates = [
+                        ...currentRequests.filter(r => r.type === 'moscosos' && r.planningYear === currentYear).map(r => r.date),
+                        ...candidateDates
+                    ];
+                    let teleworkCount = 0;
+                    allMoscosoDates.forEach(iso => {
+                        const d = yearData.calendarDays.find(day => day.iso === iso);
+                        if (d && userData.teleworkDays.includes(d.dayOfWeek)) {
+                            teleworkCount++;
+                        }
+                    });
+                    const inPersonCount = totalMoscososCount - teleworkCount;
+
+                    if (teleworkCount > 2) {
+                        return {
+                            status: 'error',
+                            message: `⛔ Demasiados moscosos en teletrabajo: El límite es de 2 días de teletrabajo para moscosos. Actualmente tienes ${teleworkCount} seleccionados.`
+                        };
+                    }
+                    if (inPersonCount > 4) {
+                        return {
+                            status: 'error',
+                            message: `⛔ Demasiados moscosos presenciales: El límite es de 4 días presenciales para moscosos. Actualmente tienes ${inPersonCount} seleccionados.`
+                        };
+                    }
+
+                    if (totalMoscososCount === 6) {
+                        if (teleworkCount !== 2) {
+                            return {
+                                status: 'error',
+                                message: `⛔ Reparto incorrecto de moscosos: Debes tener exactamente 2 días de teletrabajo y 4 presenciales. Actualmente tienes ${teleworkCount} de teletrabajo y ${inPersonCount} presenciales.`
+                            };
+                        }
+                    }
+                }
+
+                // Validación Antigüedad (Trienios)
+                if (type === 'antiguedad') {
+                    const totalTrienios = entitlements.trienios || 0;
+                    const totalAntiguedadCount = usedCommitted + count;
+                    if (totalAntiguedadCount > totalTrienios) {
+                        return { status: 'error', message: `Superas el límite de días de antigüedad. Permitidos: ${totalTrienios}, Seleccionados: ${totalAntiguedadCount}.` };
+                    }
+
+                    const allAntiguedadDates = [
+                        ...currentRequests.filter(r => r.type === 'antiguedad' && r.planningYear === currentYear).map(r => r.date),
+                        ...candidateDates
+                    ];
+                    let teleworkCount = 0;
+                    allAntiguedadDates.forEach(iso => {
+                        const d = yearData.calendarDays.find(day => day.iso === iso);
+                        if (d && userData.teleworkDays.includes(d.dayOfWeek)) {
+                            teleworkCount++;
+                        }
+                    });
+                    const inPersonCount = totalAntiguedadCount - teleworkCount;
+                    const maxAllowedTelework = Math.ceil(totalTrienios / 2);
+                    const maxAllowedInPerson = Math.ceil(totalTrienios / 2);
+
+                    if (teleworkCount > maxAllowedTelework) {
+                        return {
+                            status: 'error',
+                            message: `⛔ Demasiados días de antigüedad en teletrabajo: No puedes tener más de ${maxAllowedTelework} días de teletrabajo para trienios. Actualmente tienes ${teleworkCount} seleccionados.`
+                        };
+                    }
+                    if (inPersonCount > maxAllowedInPerson) {
+                        return {
+                            status: 'error',
+                            message: `⛔ Demasiados días de antigüedad presenciales: No puedes tener más de ${maxAllowedInPerson} días presenciales para trienios. Actualmente tienes ${inPersonCount} seleccionados.`
+                        };
+                    }
+
+                    if (totalAntiguedadCount === totalTrienios) {
+                        if (totalTrienios % 2 === 0) {
+                            const half = totalTrienios / 2;
+                            if (teleworkCount !== half) {
+                                return {
+                                    status: 'error',
+                                    message: `⛔ Reparto incorrecto de trienios: Debes tener exactamente ${half} días de teletrabajo y ${half} presenciales. Actualmente tienes ${teleworkCount} de teletrabajo y ${inPersonCount} presenciales.`
+                                };
+                            }
+                        }
+                    }
+                }
 
                 // Validación Formación
                 if (type === 'formacion') {
@@ -279,16 +412,16 @@
                     let currentBlock = 1;
                     for (let i = 0; i < sortedDates.length - 1; i++) {
                         const d1 = new Date(sortedDates[i]);
-                        const d2 = new Date(sortedDates[i+1]);
+                        const d2 = new Date(sortedDates[i + 1]);
                         const diffTime = Math.abs(d2 - d1);
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                         if (diffDays === 1) currentBlock++;
                         else { blocks.push(currentBlock); currentBlock = 1; }
                     }
                     blocks.push(currentBlock);
 
-                    const isValidBlocks = 
-                        (blocks.length === 1 && blocks[0] === 15) || 
+                    const isValidBlocks =
+                        (blocks.length === 1 && blocks[0] === 15) ||
                         (blocks.length === 2 && ((blocks[0] === 7 && blocks[1] === 8) || (blocks[0] === 8 && blocks[1] === 7)));
 
                     if (!isValidBlocks) {
@@ -318,13 +451,28 @@
                     const ratio = teleWorkCount / count;
                     if (count >= 5) {
                         if (count % 5 === 0) {
-                            const expectedTele = count * 0.4;
-                            if (teleWorkCount !== expectedTele) return { status: 'error', message: `Ratio incorrecto. Necesitas ${expectedTele} días de teletrabajo.` };
+                            const expectedTele = count * 0.6;
+                            if (teleWorkCount !== expectedTele) {
+                                return { 
+                                    status: 'error', 
+                                    message: `⛔ Ratio incorrecto: Debes tener un 60% de días de teletrabajo (${expectedTele} días) y un 40% presenciales (${count - expectedTele} días).` 
+                                };
+                            }
                         } else {
-                            if (ratio < 0.25 || ratio > 0.60) return { status: 'error', message: `Ratio desviado (${(ratio*100).toFixed(0)}%). Mantente cerca del 40%.` };
+                            if (ratio < 0.45 || ratio > 0.75) {
+                                return { 
+                                    status: 'error', 
+                                    message: `⛔ Ratio desviado (${(ratio * 100).toFixed(0)}% de teletrabajo). Intenta mantener un reparto aproximado de 60% teletrabajo y 40% presencial.` 
+                                };
+                            }
                         }
                     } else if (count >= 3) {
-                        if (teleWorkCount === 0 || teleWorkCount === count) return { status: 'error', message: `Ratio extremo (0% o 100%). Intenta equilibrar.` };
+                        if (teleWorkCount === 0 || teleWorkCount === count) {
+                            return { 
+                                status: 'error', 
+                                message: `⛔ Ratio extremo: Evita tener 0% o 100% de días de teletrabajo. Intenta equilibrar (60% teletrabajo / 40% presencial).` 
+                            };
+                        }
                     }
                 }
 
@@ -334,7 +482,7 @@
 
             useEffect(() => {
                 if (step !== 'dashboard') return;
-                const currentPendingDates = pendingRequests.filter(r => r.type === selectedType && r.date.startsWith(currentYear.toString())).map(r => r.date);
+                const currentPendingDates = pendingRequests.filter(r => r.type === selectedType && r.planningYear === currentYear).map(r => r.date);
                 if (currentPendingDates.length === 0) {
                     const msg = selectedType === 'formacion' ? `Modo: Formación. Marca findes.` : `Modo: ${selectedType.toUpperCase()}.`;
                     setAgentMessage(msg);
@@ -350,9 +498,9 @@
                 e.preventDefault();
                 const ent = calculateEntitlements(userData.years);
                 setEntitlements(ent);
-                setStep('dashboard');
-                setAgentMessage(`¡Perfil listo! Planifica tu año.`);
-                setAgentStatus('success');
+                setStep('holiday_selection');
+                setAgentMessage("¡Perfil inicial configurado! Por favor, selecciona tus festivos en el calendario y pulsa 'Confirmar Festivos'.");
+                setAgentStatus('neutral');
             };
 
             const toggleDateSelection = (isoDate) => {
@@ -360,7 +508,7 @@
                 if (!dayObj) return;
                 if (selectedType !== 'formacion' && (dayObj.type === 'festivo' || dayObj.type === 'finde')) return;
                 if (requests.find(r => r.date === isoDate)) return;
-
+ 
                 const existingPendingIndex = pendingRequests.findIndex(r => r.date === isoDate);
                 if (existingPendingIndex >= 0) {
                     const existing = pendingRequests[existingPendingIndex];
@@ -370,11 +518,19 @@
                         setPendingRequests(newPending);
                     } else {
                         const newPending = [...pendingRequests];
-                        newPending[existingPendingIndex] = { date: isoDate, type: selectedType };
+                        newPending[existingPendingIndex] = { date: isoDate, type: selectedType, planningYear: currentYear };
                         setPendingRequests(newPending);
                     }
                 } else {
-                    setPendingRequests([...pendingRequests, { date: isoDate, type: selectedType }]);
+                    setPendingRequests([...pendingRequests, { date: isoDate, type: selectedType, planningYear: currentYear }]);
+                }
+            };
+ 
+            const toggleHolidaySelection = (isoDate) => {
+                if (customHolidays.includes(isoDate)) {
+                    setCustomHolidays(customHolidays.filter(d => d !== isoDate));
+                } else {
+                    setCustomHolidays([...customHolidays, isoDate]);
                 }
             };
 
@@ -435,27 +591,9 @@
                             <form onSubmit={handleOnboardingSubmit} className="space-y-6">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-2">Años de Antigüedad</label>
-                                    <input type="number" min="0" max="50" required className="w-full border p-3 rounded-lg" value={userData.years} onChange={(e) => setUserData({...userData, years: parseInt(e.target.value) || 0})} />
-                                </div>
-                                
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-2">¿Cuántos festivos coinciden con sábado?</label>
-                                    <input type="number" min="0" max="10" required className="w-full border p-3 rounded-lg" value={userData.saturdayHolidays} onChange={(e) => setUserData({...userData, saturdayHolidays: parseInt(e.target.value) || 0})} />
-                                    <p className="text-xs text-slate-500 mt-1">Este número determinará tus días de "Compensatorios Sáb."</p>
+                                    <input type="number" min="0" max="50" required className="w-full border p-3 rounded-lg" value={userData.years} onChange={(e) => setUserData({ ...userData, years: parseInt(e.target.value) || 0 })} />
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-700 mb-2">Días de Teletrabajo</label>
-                                    <div className="flex gap-2">
-                                        {['Lun', 'Mar', 'Mié', 'Jue', 'Vie'].map((day, idx) => {
-                                            const dayNum = idx + 1;
-                                            const isSelected = userData.teleworkDays.includes(dayNum);
-                                            return (
-                                                <button key={day} type="button" onClick={() => isSelected ? setUserData({...userData, teleworkDays: userData.teleworkDays.filter(d => d !== dayNum)}) : (userData.teleworkDays.length < 2 && setUserData({...userData, teleworkDays: [...userData.teleworkDays, dayNum]}))} className={`flex-1 py-2 rounded-md border text-sm ${isSelected ? 'bg-blue-600 text-white' : 'bg-white'}`}>{day}</button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
                                 <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-bold">Iniciar</button>
                             </form>
                         </div>
@@ -463,10 +601,15 @@
                 );
             }
 
-            const compensatoriosTotal = userData.saturdayHolidays;
+            const compensatoriosTotal = yearData.compensatoriosGenerados.length;
             const vacTotal = entitlements.vacaciones + entitlements.asimilados;
-            const getRealTimeUsage = (type, committedUsed) => committedUsed + pendingRequests.filter(r => r.type === type && r.date.startsWith(currentYear.toString())).length;
-
+            const getRealTimeUsage = (type, committedUsed) => committedUsed + pendingRequests.filter(r => r.type === type && r.planningYear === currentYear).length;
+ 
+            const MONTHS_TO_RENDER = [
+                ...MONTH_NAMES.map((name, idx) => ({ name, month: idx, year: currentYear })),
+                { name: `Enero (${currentYear + 1})`, month: 0, year: currentYear + 1 }
+            ];
+ 
             return (
                 <div className="min-h-screen md:h-screen bg-slate-50 font-sans flex flex-col md:flex-row md:overflow-hidden print:overflow-visible print:h-auto print:block">
                     {/* SIDEBAR */}
@@ -481,48 +624,77 @@
                                 <p className="font-medium">{agentMessage}</p>
                             </div>
                         </div>
-                        <div className="space-y-3">
-                            {[
-                                { id: 'vacaciones', label: 'Vacaciones Ordinarias', total: vacTotal, color: 'bg-green-500' },
-                                { id: 'antiguedad', label: 'Antigüedad (Trienios)', total: entitlements.trienios, color: 'bg-purple-500' },
-                                { id: 'moscosos', label: 'Moscosos', total: entitlements.moscosos, color: 'bg-blue-500' },
-                                { id: 'compensatorio', label: 'Compensatorios Sáb.', total: compensatoriosTotal, color: 'bg-yellow-500' },
-                                { id: 'sanisidro', label: 'San Isidro (1 día)', total: entitlements.sanisidro, color: 'bg-teal-500' },
-                                { id: 'formacion', label: 'Formación', total: entitlements.formacion, color: 'bg-orange-500' },
-                            ].map(type => {
-                                const committed = getUsedCount(type.id);
-                                const realTimeUsed = getRealTimeUsage(type.id, committed);
-                                const remaining = type.total - realTimeUsed;
-                                const isSelected = selectedType === type.id;
-                                const hasPending = pendingRequests.some(r => r.type === type.id && r.date.startsWith(currentYear.toString()));
-                                return (
-                                    <button key={type.id} type="button" onClick={() => { setSelectedType(type.id); setAgentStatus('neutral'); }} className={`w-full text-left p-3 rounded-lg border transition-all relative ${isSelected ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'} ${type.total === 0 ? 'opacity-50' : ''}`} disabled={type.total === 0}>
-                                        { !isSelected && hasPending && <span className="absolute top-2 right-2 w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span> }
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="font-semibold text-sm text-slate-700">{type.label}</span>
-                                            {type.id === 'vacaciones' && remaining > 7 + entitlements.asimilados && <LockIcon className="w-3 h-3 text-slate-400" />}
+                        {step === 'holiday_selection' ? (
+                            <div className="flex flex-col gap-6 h-full justify-between">
+                                <div className="space-y-4">
+                                    <h3 className="font-bold text-md text-slate-700">Configuración de Festivos</h3>
+                                    <p className="text-sm text-slate-600 leading-relaxed">
+                                        Haz clic sobre los días del calendario para marcarlos o desmarcarlos como festivos.
+                                    </p>
+                                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-2">
+                                        <div className="flex items-center gap-2 text-xs text-slate-600">
+                                            <span className="w-3 h-3 bg-red-400 rounded-sm"></span>
+                                            <span>Festivos marcados</span>
                                         </div>
-                                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden relative">
-                                            <div className={`h-full ${type.color} opacity-60 absolute left-0 top-0`} style={{ width: `${(committed / type.total) * 100}%` }}></div>
-                                            <div className={`h-full ${type.color} absolute top-0 transition-all duration-300`} style={{ left: `${(committed / type.total) * 100}%`, width: `${((realTimeUsed - committed) / type.total) * 100}%` }}></div>
+                                        <div className="flex items-center gap-2 text-xs text-slate-600">
+                                            <span className="w-3 h-3 bg-yellow-500 rounded-sm"></span>
+                                            <span>Sábados festivos (generan compensatorios)</span>
                                         </div>
-                                        <div className="flex justify-between text-xs text-slate-500 mt-1 font-mono">
-                                            <span>Usados: {realTimeUsed}</span>
-                                            <span className={remaining < 0 ? 'text-red-600 font-bold' : ''}>Restantes: {remaining}</span>
-                                        </div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                        <div className="mt-auto pt-4 border-t space-y-3">
-                            <button type="button" onClick={validateAndBook} className={`w-full py-3 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2 ${pendingRequests.length > 0 ? 'bg-slate-900 hover:bg-slate-800 shadow-lg transform active:scale-95' : 'bg-slate-300 cursor-not-allowed'}`} disabled={pendingRequests.length === 0}>
-                                {pendingRequests.length > 0 ? `Validar Todo (${pendingRequests.length} días)` : 'Nada pendiente'}
-                            </button>
-                            <div className="flex gap-2">
-                                {requests.length > 0 && ( <button type="button" onClick={downloadCSV} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Descargar CSV"> <DownloadIcon className="w-4 h-4" /> CSV </button> )}
-                                <button type="button" onClick={handlePrint} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Imprimir"> <PrinterIcon className="w-4 h-4" /> Imprimir </button>
+                                    </div>
+                                    <div className="text-xs text-slate-500 font-mono">
+                                        Compensatorios estimados: {compensatoriosTotal}
+                                    </div>
+                                </div>
+                                <button type="button" onClick={() => { setStep('dashboard'); setAgentMessage('¡Festivos configurados! Ahora planifica tu año.'); setAgentStatus('success'); }} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg shadow-lg transition-all transform active:scale-95">
+                                    Confirmar Festivos
+                                </button>
                             </div>
-                        </div>
+                        ) : (
+                            <>
+                                <div className="space-y-3">
+                                    {[
+                                        { id: 'vacaciones', label: 'Vacaciones Ordinarias', total: vacTotal, color: 'bg-green-500' },
+                                        { id: 'antiguedad', label: 'Antigüedad (Trienios)', total: entitlements.trienios, color: 'bg-purple-500' },
+                                        { id: 'moscosos', label: 'Moscosos', total: entitlements.moscosos, color: 'bg-blue-500' },
+                                        { id: 'compensatorio', label: 'Compensatorios Sáb.', total: compensatoriosTotal, color: 'bg-yellow-500' },
+                                        { id: 'sanisidro', label: 'San Isidro (1 día)', total: entitlements.sanisidro, color: 'bg-teal-500' },
+                                        { id: 'formacion', label: 'Formación', total: entitlements.formacion, color: 'bg-orange-500' },
+                                    ].map(type => {
+                                        const committed = getUsedCount(type.id);
+                                        const realTimeUsed = getRealTimeUsage(type.id, committed);
+                                        const remaining = type.total - realTimeUsed;
+                                        const isSelected = selectedType === type.id;
+                                        const hasPending = pendingRequests.some(r => r.type === type.id && r.planningYear === currentYear);
+                                        return (
+                                            <button key={type.id} type="button" onClick={() => { setSelectedType(type.id); setAgentStatus('neutral'); }} className={`w-full text-left p-3 rounded-lg border transition-all relative ${isSelected ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'} ${type.total === 0 ? 'opacity-50' : ''}`} disabled={type.total === 0}>
+                                                {!isSelected && hasPending && <span className="absolute top-2 right-2 w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>}
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="font-semibold text-sm text-slate-700">{type.label}</span>
+                                                    {type.id === 'vacaciones' && remaining > 7 + entitlements.asimilados && <LockIcon className="w-3 h-3 text-slate-400" />}
+                                                </div>
+                                                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden relative">
+                                                    <div className={`h-full ${type.color} opacity-60 absolute left-0 top-0`} style={{ width: `${(committed / type.total) * 100}%` }}></div>
+                                                    <div className={`h-full ${type.color} absolute top-0 transition-all duration-300`} style={{ left: `${(committed / type.total) * 100}%`, width: `${((realTimeUsed - committed) / type.total) * 100}%` }}></div>
+                                                </div>
+                                                <div className="flex justify-between text-xs text-slate-500 mt-1 font-mono">
+                                                    <span>Usados: {realTimeUsed}</span>
+                                                    <span className={remaining < 0 ? 'text-red-600 font-bold' : ''}>Restantes: {remaining}</span>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <div className="mt-auto pt-4 border-t space-y-3">
+                                    <button type="button" onClick={validateAndBook} className={`w-full py-3 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2 ${pendingRequests.length > 0 ? 'bg-slate-900 hover:bg-slate-800 shadow-lg transform active:scale-95' : 'bg-slate-300 cursor-not-allowed'}`} disabled={pendingRequests.length === 0}>
+                                        {pendingRequests.length > 0 ? `Validar Todo (${pendingRequests.length} días)` : 'Nada pendiente'}
+                                    </button>
+                                    <div className="flex gap-2">
+                                        {requests.some(r => r.planningYear === currentYear) && (<button type="button" onClick={downloadCSV} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Descargar CSV"> <DownloadIcon className="w-4 h-4" /> CSV </button>)}
+                                        <button type="button" onClick={handlePrint} className="flex-1 py-3 rounded-lg font-bold text-slate-700 border border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 text-xs" title="Imprimir"> <PrinterIcon className="w-4 h-4" /> Imprimir </button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
 
                     {/* CALENDARIO */}
@@ -537,13 +709,13 @@
                         </div>
                         <h2 className="hidden print:block text-2xl font-bold text-slate-800 mb-6 text-center"> Planificación Vacaciones {currentYear} </h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 print:grid-cols-3 print:gap-4 print:text-xs">
-                            {MONTH_NAMES.map((monthName, mIdx) => {
-                                const currentMonthDays = yearData.calendarDays.filter(d => d.month === mIdx);
-                                const firstDayObj = new Date(currentYear, mIdx, 1);
+                            {MONTHS_TO_RENDER.map(({ name, month, year }) => {
+                                const currentMonthDays = yearData.calendarDays.filter(d => d.month === month && d.date.getFullYear() === year);
+                                const firstDayObj = new Date(year, month, 1);
                                 const firstDayWeekIndex = firstDayObj.getDay() === 0 ? 6 : firstDayObj.getDay() - 1;
                                 return (
-                                    <div key={monthName} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden break-inside-avoid">
-                                        <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 font-semibold text-slate-700 text-center print:py-1 print:bg-slate-200">{monthName}</div>
+                                    <div key={`${year}-${month}`} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden break-inside-avoid">
+                                        <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 font-semibold text-slate-700 text-center print:py-1 print:bg-slate-200">{name}</div>
                                         <div className="p-4 grid grid-cols-7 gap-1 text-center text-sm print:p-2 print:gap-0.5">
                                             {DAY_NAMES.map(d => <span key={d} className="text-slate-400 text-xs font-bold mb-2 print:mb-1">{d.charAt(0)}</span>)}
                                             {Array.from({ length: firstDayWeekIndex }).map((_, i) => <div key={`e-${i}`} />)}
@@ -552,16 +724,26 @@
                                                 const pendingReq = pendingRequests.find(r => r.date === day.iso);
                                                 const isTele = userData.teleworkDays.includes(day.dayOfWeek);
                                                 let base = "rounded-md flex flex-col items-center justify-center relative text-xs transition-colors ";
-                                                if (day.type === 'finde') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-slate-400 " : "text-slate-300 bg-slate-50 ";
-                                                else if (day.type === 'festivo') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-red-400 " : "bg-red-400 text-white ";
-                                                else if (committedReq) base += COLORS[committedReq.type] + " text-white cursor-not-allowed opacity-60 "; 
-                                                else if (pendingReq) base += COLORS[pendingReq.type + '_pending'] + " ring-2 ring-slate-400 font-bold cursor-pointer ";
-                                                else base += "hover:bg-slate-100 cursor-pointer text-slate-700 ";
-                                                if ((day.type === 'finde' || day.type === 'festivo') && pendingReq) { base = COLORS[pendingReq.type + '_pending'] + " ring-2 ring-slate-400 font-bold cursor-pointer aspect-square rounded-md flex flex-col items-center justify-center relative text-xs "; }
+                                                if (step === 'holiday_selection') {
+                                                    base += "cursor-pointer hover:bg-slate-100 ";
+                                                    if (day.type === 'festivo') {
+                                                        base += "bg-red-400 text-white hover:bg-red-500 ";
+                                                    } else if (day.type === 'finde') {
+                                                        base += "text-slate-400 bg-slate-50 ";
+                                                    } else {
+                                                        base += "text-slate-700 ";
+                                                    }
+                                                } else {
+                                                    if (day.type === 'finde') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-slate-400 bg-slate-50 " : "text-slate-300 bg-slate-50 ";
+                                                    else if (day.type === 'festivo') base += selectedType === 'formacion' ? "hover:bg-slate-100 cursor-pointer text-red-400 bg-red-50 " : "bg-red-400 text-white ";
+                                                    else if (committedReq) base += COLORS[committedReq.type] + " text-white cursor-not-allowed opacity-60 ";
+                                                    else if (pendingReq) base += COLORS[pendingReq.type + '_pending'] + " ring-2 ring-slate-400 font-bold cursor-pointer ";
+                                                    else base += "hover:bg-slate-100 cursor-pointer text-slate-700 ";
+                                                }
                                                 return (
-                                                    <div key={day.iso} onClick={() => toggleDateSelection(day.iso)} className={base + " aspect-square"}>
+                                                    <div key={day.iso} onClick={() => step === 'holiday_selection' ? toggleHolidaySelection(day.iso) : toggleDateSelection(day.iso)} className={base + " aspect-square"}>
                                                         {day.day}
-                                                        {isTele && day.type === 'laborable' && !committedReq && <span className="w-1 h-1 rounded-full bg-slate-400 absolute bottom-1 no-print"/>}
+                                                        {step !== 'holiday_selection' && isTele && day.type === 'laborable' && !committedReq && <span className="w-1 h-1 rounded-full bg-slate-400 absolute bottom-1 no-print" />}
                                                     </div>
                                                 );
                                             })}
@@ -579,6 +761,5 @@
         root.render(<VacationApp />);
     </script>
 </body>
+
 </html>
-    
-   
